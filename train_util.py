@@ -241,7 +241,7 @@ class TrainLoop:
                         losses = compute_losses()
 
                 log_loss_dict(
-                    self.diffusion, t-1, {f"eval_{k}": v * weights for k, v in losses.items()}
+                    self.diffusion, t-1, {f"eval/{k}": v * weights for k, v in losses.items()}
                 )
 
     def _log_t(self, t):
