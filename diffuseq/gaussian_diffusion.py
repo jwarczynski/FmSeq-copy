@@ -7,10 +7,16 @@ Docstrings have been added, as well as DDIM sampling and a new collection of bet
 
 import enum
 import math
+from typing import Optional
 
 import numpy as np
 import torch as th
 import sys
+
+from torch import Tensor
+
+from .batch import FlowMatchingBatch
+
 sys.path.append('.')
 
 import torch.nn.functional as F
@@ -608,13 +614,43 @@ class GaussianDiffusion:
         mse_mask = th.broadcast_to(mse_mask.unsqueeze(dim=-1), x_start.shape)
         return mse_mask
 
+    def _interpolate_data_noise(
+            self, x_start: Tensor, t: Tensor, noise: Optional[Tensor] = None
+    ) -> tuple[Tensor, Tensor]:
+        t = self.scale_t(t)
+        t = t.view(-1, 1, 1)  # Reshape to (batch_size, 1, 1) to match x_start
 
-    def training_losses_seq2seq(self, model, x_start, t, model_kwargs=None, noise=None, sc_rate=0):
+        if noise is None:
+            noise = th.randn_like(x_start)
+
+        return x_start + (noise - x_start) * t, noise
+
+    def scale_t(self, t):
+        return t.float() * (1.0 / self.model.original_num_steps)
+
+    def _prepare_batch(self, model, model_kwargs, t) -> FlowMatchingBatch:
+        input_ids_x: Tensor = model_kwargs.pop('input_ids').to(t.device)
+        input_ids_mask: Tensor = model_kwargs.pop('input_mask').to(t.device)
+        embeddings = model.model.module.get_embeds(input_ids_x)
+
+        x_t, noise = self._interpolate_data_noise(embeddings, t)
+        x_t = th.where(input_ids_mask.unsqueeze(-1) == 0, embeddings, x_t)
+
+        return FlowMatchingBatch(
+            seqs=input_ids_x,
+            padding_mask=None,
+            input_ids_mask=input_ids_mask,
+            x_start=embeddings,
+            x_t=x_t,
+            noise=noise,
+            t=t
+        )
+
+    def training_losses_seq2seq(self, model, t, model_kwargs=None, noise=None, sc_rate=0):
         """
         Compute training losses for a single timestep.
 
         :param model: the model to evaluate loss on.
-        :param x_start: the [N x C x ...] tensor of inputs. # not used unless fixing the input embeddings
         :param t: a batch of timestep indices.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
@@ -622,32 +658,13 @@ class GaussianDiffusion:
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
-        x_start_fix = x_start # save the orignal x_0
-        assert 'input_ids' in model_kwargs
-        input_ids_x = model_kwargs.pop('input_ids').to(t.device)
-        input_ids_mask = model_kwargs.pop('input_mask').to(t.device)
-        # print(input_ids_x.shape, input_ids_mask.shape)
-        x_start_mean = model.model.module.get_embeds(input_ids_x)
-        
-        std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod,
-                                   th.tensor([0]).to(x_start_mean.device),
-                                   x_start_mean.shape)
-        std = th.zeros_like(std) # do not add noise into embedding
-        # print(std.shape, )
-        # x_start_log_var = 2 * th.log(std)
-        x_start = self._get_x_start(x_start_mean, std)
-        # print(x_start_mean.shape, x_start.shape)
-        if noise is None:
-            noise = th.randn_like(x_start)
-
-        rescale_t = th.broadcast_to(t.float() * (1.0 / self.num_timesteps), \
-                                    (x_start.size(1), x_start.size(2), x_start.size(0))).permute(2,0,1) # 1~2000 --> 0.0005~1
-
-        x_t = x_start + (noise-x_start)*rescale_t # transformation path in flow matching, x1, x0 = noise, x_start
-        
-
-        input_ids_mask_reshape = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape)
-        x_t = th.where(input_ids_mask_reshape==0, x_start, x_t)
+        batch = self._prepare_batch(model, model_kwargs, t)
+        input_ids_mask_reshape = batch.input_ids_mask.unsqueeze(-1)
+        x_t = batch.x_t
+        input_ids_x = batch.seqs
+        input_ids_mask = batch.input_ids_mask
+        x_start = batch.x_start
+        noise = batch.noise
 
         if sc_rate > 0: # use self conditioning
             x_0_hat = th.where(input_ids_mask_reshape==0, x_start, 0).to(t.device)

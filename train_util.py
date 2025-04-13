@@ -2,6 +2,7 @@ import copy
 import functools
 import os
 
+from torch import Tensor
 from tqdm import tqdm
 import blobfile as bf
 import numpy as np
@@ -173,6 +174,7 @@ class TrainLoop:
         self.model.convert_to_fp16()
 
     def run_loop(self):
+        data_iter = iter(self.data)
         pbar = tqdm(range(self.learning_steps), desc="Total Progress")
         pbar.update(self.resume_step)
         while (
@@ -180,9 +182,9 @@ class TrainLoop:
             or self.step + self.resume_step < self.learning_steps
         ):
             pbar.update(1)
-            batch, cond = next(self.data)
+            cond = next(data_iter)
             # print(batch.shape)
-            self.run_step(batch, cond)
+            self.run_step(cond)
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
             if self.eval_data is not None and self.step % self.eval_interval == 0:
@@ -201,8 +203,8 @@ class TrainLoop:
         if (self.step - 1) % self.save_interval != 0:
             self.save()
 
-    def run_step(self, batch, cond):
-        self.forward_backward(batch, cond)
+    def run_step(self, cond):
+        self.forward_backward(cond)
         if self.use_fp16:
             self.optimize_fp16()
         else:
@@ -245,23 +247,23 @@ class TrainLoop:
     def _log_t(self, t):
         logger.logkv("mean of t", t.float().mean().item())
 
-    def forward_backward(self, batch, cond):
+    def forward_backward(self, cond: dict[str, Tensor]):
         zero_grad(self.model_params)
-        for i in tqdm(range(0, batch.shape[0], self.microbatch), desc="Training", leave=False):
-            micro = batch[i : i + self.microbatch].to(dist_util.dev())
+        bsz = cond["input_ids"].shape[0]
+        for i in tqdm(range(0, bsz, self.microbatch), desc="Training", leave=False):
             micro_cond = {
                 k: v[i : i + self.microbatch].to(dist_util.dev())
                 for k, v in cond.items()
             }
-            last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+            last_batch = (i + self.microbatch) >= bsz
+            micro_bsz = micro_cond["input_ids"].shape[0]
+            t, weights = self.schedule_sampler.sample(micro_bsz, dist_util.dev())
             # t = th.ones_like(t)*self.diffusion.num_timesteps
             self._log_t(t) # record the distribution of t by wandb
             # print(micro_cond.keys())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
-                micro,
                 t,
                 model_kwargs=micro_cond,
                 sc_rate=self.sc_rate
