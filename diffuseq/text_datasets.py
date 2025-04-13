@@ -311,6 +311,24 @@ class TextDataset(Dataset):
 
             return arr, out_kwargs
 
+
+class ShorctutFmDataset(Dataset):
+    def __init__(self, text_dataset):
+        super().__init__()
+        self.text_dataset = text_dataset
+        self.length = len(self.text_dataset)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        return {
+            "input_ids": torch.tensor(self.text_dataset[idx]['input_ids']),
+            # "padding_mask": torch.tensor(self.text_dataset[idx]['padding_mask']),
+            "input_mask": torch.tensor(self.text_dataset[idx]['input_mask']),
+        }
+
+
 def _collate_batch_helper(examples, pad_token_id, max_length, return_mask=False):
     result = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
     mask_ = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
