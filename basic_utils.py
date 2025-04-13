@@ -9,6 +9,8 @@ from tokenizers.processors import BertProcessing
 from tokenizers import ByteLevelBPETokenizer, decoders
 
 from diffuseq import gaussian_diffusion as gd
+from diffuseq.config import TrainingConfig
+from diffuseq.factory import TransformerNetModelFactory
 from diffuseq.gaussian_diffusion import SpacedDiffusion, space_timesteps
 from diffuseq.transformer_model import TransformerNetModel
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
@@ -205,6 +207,7 @@ def load_defaults_config():
 
 
 def create_model_and_diffusion(
+    cfg: TrainingConfig,
     hidden_t_dim,
     hidden_dim,
     vocab_size,
@@ -234,6 +237,13 @@ def create_model_and_diffusion(
         init_pretrained=use_plm_init,
         sc_rate=sc_rate
     )
+    print(f"Number of FlowSeq parameters: {sum(p.numel() for p in model.parameters())}")
+    print(f"FlowSeq model: {model}")
+
+    print("model_config", cfg.model)
+    model = TransformerNetModelFactory(cfg.model).build()
+    print(f"Number of ShortcutFM parameters: {sum(p.numel() for p in model.parameters())}")
+    print(f"ShortcutFM model: {model}")
 
     betas = gd.get_named_beta_schedule(noise_schedule, diffusion_steps)
 

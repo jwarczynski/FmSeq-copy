@@ -168,7 +168,7 @@ def main():
     logger.log("### Creating model and diffusion...")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     model, diffusion = create_model_and_diffusion(
-        **args_to_dict(args, load_defaults_config().keys())
+        cfg=cfg, **args_to_dict(args, load_defaults_config().keys())
     )
     # print('#'*30, 'cuda', dist_util.dev())
     model.to(dist_util.dev())  # DEBUG **
