@@ -20,7 +20,8 @@ def setup_dist():
     if dist.is_initialized():
         return
 
-    backend = "gloo" if not th.cuda.is_available() else "nccl"
+    backend = "gloo" if (not th.cuda.is_available() or not th.distributed.is_nccl_available()) else "nccl"
+    print(f"Using backend: {backend}")
 
     if backend == "gloo":
         hostname = "localhost"
