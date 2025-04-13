@@ -185,8 +185,9 @@ def main():
 
     if ('LOCAL_RANK' not in os.environ) or (int(os.environ['LOCAL_RANK']) == 0):
         wandb.init(
-            project=os.getenv("WANDB_PROJECT", "FMSeq"),
-            name=args.checkpoint_path,
+            # project=os.getenv("WANDB_PROJECT", "FMSeqtest"),
+            project=cfg.wandb.project_name,
+            name=cfg.wandb.run_name,
         )
         wandb.config.update(args.__dict__, allow_val_change=True)
 
