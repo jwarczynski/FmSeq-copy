@@ -6,3 +6,6 @@ generation_outputs/*
 srun_logs/*
 wandb/*
 /scripts/*.slurm
+
+slurm/
+wandb/
